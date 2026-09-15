@@ -53,6 +53,10 @@ func run() -> void:
 	game.save_records = false
 	await frames(3)
 	check(game.state == "title", "starts at title")
+	if game.web_profile:
+		check(root.disable_3d, "web title does not render the 3D world")
+		check(root.msaa_3d == Viewport.MSAA_DISABLED, "web disables multisampling")
+		check(is_equal_approx(root.scaling_3d_scale, 0.75), "web uses reduced 3D resolution")
 	check(game.enemies.size() >= 10, "populates knights and monsters")
 	check(game.total_coins >= 30, "enough coins for upgrade progression")
 	var original_layout = game.maze.cells.duplicate()
@@ -60,6 +64,8 @@ func run() -> void:
 	for enemy in game.enemies:
 		enemy.set_physics_process(false)
 	check(game.state == "playing", "starts gameplay")
+	if game.web_profile:
+		check(not root.disable_3d, "starting web gameplay restores 3D rendering")
 	# Let a real blackguard navigate a right-angle passage and attack.
 	var escape_route = game.maze.path(Vector2i(1, 0), game.maze.exit_cell)
 	var corner = -1

@@ -132,6 +132,8 @@ func _draw() -> void:
 		"dead", "victory": draw_result()
 
 func draw_title() -> void:
+	if game.web_profile:
+		draw_rect(Rect2(0, 0, 1440, 900), Color("101d26"))
 	# Layered translucent bands keep the living castle visible behind the menu.
 	draw_polygon(PackedVector2Array([Vector2(0, 0), Vector2(1056, 0), Vector2(1056, 900), Vector2(0, 900)]), PackedColorArray([Color(0.025, 0.06, 0.082, 0.98), Color(0.025, 0.06, 0.082, 0.12), Color(0.025, 0.06, 0.082, 0.12), Color(0.025, 0.06, 0.082, 0.98)]))
 	draw_rect(Rect2(0, 0, 1440, 100), Color(0.03, 0.06, 0.08, 0.25))

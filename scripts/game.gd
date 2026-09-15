@@ -37,21 +37,38 @@ var best_time: float = 0
 var save_records = true
 var capture_path = ""
 var capture_frames = 0
+var web_profile = OS.has_feature("web") or "--web-profile" in OS.get_cmdline_user_args()
 
 func _ready() -> void:
+	if OS.has_feature("web"):
+		print("Startup: scene ready")
+	if web_profile:
+		# Leave browser time for input and avoid rendering the castle behind menus.
+		Engine.max_fps = 60
+		get_viewport().msaa_3d = Viewport.MSAA_DISABLED
+		get_viewport().scaling_3d_scale = 0.75
+		get_viewport().disable_3d = true
 	configure_input()
 	make_environment()
+	if OS.has_feature("web"):
+		print("Startup: environment ready; preparing audio")
 	sound = MazeSound.new()
 	add_child(sound)
+	if OS.has_feature("web"):
+		print("Startup: audio ready; building castle")
 	var save = ConfigFile.new()
 	if save.load("user://record.cfg") == OK:
 		best_time = float(save.get_value("record", "time", 0))
 	new_run(current_seed)
+	if OS.has_feature("web"):
+		print("Startup: castle ready; preparing title")
 	var canvas = CanvasLayer.new()
 	add_child(canvas)
 	hud = MazeHUD.new()
 	hud.game = self
 	canvas.add_child(hud)
+	if OS.has_feature("web"):
+		print("Startup: title ready")
 	for arg in OS.get_cmdline_user_args():
 		if arg == "--autostart":
 			start()
@@ -100,7 +117,7 @@ func make_environment() -> void:
 	sun.rotation_degrees = Vector3(-32, -32, 0)
 	sun.light_color = Color("ffdaa5")
 	sun.light_energy = 0.82
-	sun.shadow_enabled = true
+	sun.shadow_enabled = not web_profile
 	sun.directional_shadow_max_distance = 65
 	add_child(sun)
 
@@ -197,6 +214,8 @@ func spawn_pickup(pos: Vector3, healing: bool = false) -> MazePickup:
 
 func start() -> void:
 	state = "playing"
+	if web_profile:
+		get_viewport().disable_3d = false
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	player.camera.rotation.x = 0
 	if level == 1 and weapon_tier == 0:
@@ -277,6 +296,9 @@ func reveal_map() -> void:
 
 func _process(delta: float) -> void:
 	clock += delta
+	if web_profile and state == "title":
+		# The title is static in browsers; don't rebuild text or animate the world.
+		return
 	maze.animate(clock, player.position)
 	if state == "playing":
 		elapsed += delta
