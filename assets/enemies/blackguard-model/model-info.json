@@ -1,0 +1,17 @@
+{
+  "mesh_objects": 236,
+  "vertices": 6188,
+  "triangles": 11423,
+  "bones": 18,
+  "materials": 15,
+  "height_metres": 2.313,
+  "dimensions_metres": [
+    2.335,
+    0.703,
+    2.313
+  ],
+  "uv_mapped": true,
+  "rig_type": "Rigid component weights; no animation clips",
+  "glb_mesh_objects": 1,
+  "source": "Original mesh construction based on packed Blackguard concept"
+}

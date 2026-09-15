@@ -1,0 +1,45 @@
+{
+  "name": "Ash Hound",
+  "slug": "ash-hound",
+  "rig": "Ash_Hound_Rig",
+  "collection": "ASH HOUND | Character",
+  "mesh_objects": 87,
+  "vertices": 2348,
+  "triangles": 4348,
+  "bones": 19,
+  "materials": 13,
+  "dimensions_metres": [
+    1.112,
+    2.73,
+    1.759
+  ],
+  "uv_mapped": true,
+  "glb_mesh_objects": 1,
+  "rig_type": "Basic posing rig: blended creature body weights, rigid armor and accessories. No animation clips or IK.",
+  "pose_check_object": "Head | angular skull",
+  "landmarks": {
+    "dorsal_spikes": {
+      "prefix": "Dorsal spike ",
+      "count": 5
+    },
+    "fangs": {
+      "prefix": "Fang ",
+      "count": 2
+    },
+    "paws": {
+      "suffix": "paw | broad pad",
+      "count": 4
+    }
+  },
+  "back_camera": [
+    -3.8,
+    5.2,
+    2.7
+  ],
+  "camera_target": [
+    0,
+    -0.24,
+    0.84
+  ],
+  "source": "Original low-poly geometry based on packed enemy concept"
+}

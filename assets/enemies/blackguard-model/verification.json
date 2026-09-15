@@ -1,0 +1,14 @@
+{
+  "blender_file_reopened": true,
+  "packed_concept_reference": true,
+  "all_meshes_uv_mapped": true,
+  "head_pose_verified": true,
+  "glb_reimported": true,
+  "glb_meshes": 1,
+  "glb_bones": 18,
+  "glb_materials": 15,
+  "triangles": 11423,
+  "all_vertices_weighted": true,
+  "roundtrip_bounds_match": true,
+  "studio_excluded_from_glb": true
+}

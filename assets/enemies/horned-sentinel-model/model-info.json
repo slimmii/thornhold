@@ -1,0 +1,42 @@
+{
+  "name": "Horned Sentinel",
+  "slug": "horned-sentinel",
+  "rig": "Horned_Sentinel_Rig",
+  "collection": "HORNED SENTINEL | Character",
+  "mesh_objects": 130,
+  "vertices": 3639,
+  "triangles": 6758,
+  "bones": 19,
+  "materials": 15,
+  "dimensions_metres": [
+    2.829,
+    0.775,
+    3.361
+  ],
+  "uv_mapped": true,
+  "glb_mesh_objects": 1,
+  "rig_type": "Basic posing rig: blended creature body weights, rigid armor and accessories. No animation clips or IK.",
+  "pose_check_object": "Head | squared ogre skull",
+  "landmarks": {
+    "horns": {
+      "prefix": "Horn ",
+      "suffix": "curved ivory",
+      "count": 2
+    },
+    "axe_blade": {
+      "prefix": "Axe | broad forged blade",
+      "count": 1
+    }
+  },
+  "back_camera": [
+    -4.3,
+    8,
+    3.9
+  ],
+  "camera_target": [
+    -0.16,
+    0,
+    1.69
+  ],
+  "source": "Original low-poly geometry based on packed enemy concept"
+}
