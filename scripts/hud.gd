@@ -11,6 +11,7 @@ var serif: SystemFont
 var sans: SystemFont
 var buttons: Array[Button] = []
 var scale_factor = Vector2.ONE
+var style_cache: Dictionary = {}
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -47,11 +48,15 @@ func panel(rect: Rect2, color: Color = Color(0.045, 0.085, 0.115, 0.88), border:
 	draw_style_box(style(color, border), rect)
 
 func style(color: Color, border: Color) -> StyleBoxFlat:
+	var key = color.to_html() + border.to_html()
+	if style_cache.has(key):
+		return style_cache[key]
 	var box = StyleBoxFlat.new()
 	box.bg_color = color
 	box.border_color = border
 	box.set_border_width_all(1)
 	box.set_corner_radius_all(3)
+	style_cache[key] = box
 	return box
 
 func button(label: String, rect: Rect2, action: Callable, primary: bool = false, disabled: bool = false) -> void:
@@ -73,6 +78,9 @@ func button(label: String, rect: Rect2, action: Callable, primary: bool = false,
 	node.add_theme_stylebox_override("disabled", style(Color("172630"), Color("2b3d46")))
 	node.add_theme_stylebox_override("focus", style(Color(0, 0, 0, 0), GREEN))
 	node.disabled = disabled
+	if game.browser_pointer:
+		# Request pointer lock while the browser's mouse-down gesture is active.
+		node.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	node.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	node.pressed.connect(action)
 	add_child(node)
@@ -81,6 +89,7 @@ func button(label: String, rect: Rect2, action: Callable, primary: bool = false,
 func refresh_buttons() -> void:
 	if not is_inside_tree():
 		return
+	queue_redraw()
 	scale_factor = get_viewport_rect().size / Vector2(1440, 900)
 	for node in buttons:
 		remove_child(node)
@@ -122,6 +131,12 @@ func _draw() -> void:
 		draw_title()
 		return
 	draw_hud()
+	if game.show_performance:
+		panel(Rect2(32, 124, 292, 37))
+		var detail = "%d FPS" % Engine.get_frames_per_second()
+		if game.web_profile:
+			detail += " · Sharp 100%"
+		text_at(detail, Vector2(46, 148), 12, MUTED)
 	if game.damage_flash > 0 and game.state == "playing":
 		draw_rect(Rect2(0, 0, 1440, 900), Color(0.7, 0.13, 0.12, game.damage_flash * 0.35))
 	if game.show_map and game.state == "playing":
@@ -273,6 +288,8 @@ func draw_pause() -> void:
 	diamond(Vector2(720, 251), 9, GOLD, false)
 	centered("A moment of respite", Vector2(720, 314), 36, CREAM, true)
 	centered("Level %d · Your gear and gold stay with you on retry." % game.level, Vector2(720, 351), 14, MUTED)
+	if game.browser_pointer:
+		centered("Click Resume to return control to the game.", Vector2(720, 383), 13, GREEN)
 	centered("New journey starts at level 1 and resets gold and gear.", Vector2(720, 676), 12, MUTED)
 	centered("WASD · move     Mouse · look     LMB · strike     RMB · guard", Vector2(720, 748), 14, MUTED)
 	centered("Shift · sprint     Space · jump     B · armory     M · map     F11 · fullscreen", Vector2(720, 779), 13, MUTED)

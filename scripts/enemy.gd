@@ -86,6 +86,9 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	if game == null or game.state != "playing":
 		return
+	# Only presentation is throttled; navigation, collisions, and strike timing
+	# keep their physics cadence even when a hunter is far from the player.
+	model.update_interval = 1.0 / 15.0 if game.web_profile and position.distance_squared_to(game.player.position) > 400.0 else 0.0
 	if dead:
 		death_elapsed += delta
 		model.tick(delta, 0.0, false)
@@ -174,6 +177,11 @@ func _physics_process(delta: float) -> void:
 
 func attack_reach() -> float:
 	return 1.65 if kind == 2 else 1.3
+
+func melee_targets(origin: Vector3) -> Array[Vector3]:
+	if kind == 1:
+		return model.melee_targets(origin)
+	return [global_position + Vector3(0, target_height, 0)]
 
 func begin_attack() -> void:
 	if dead or stun > 0.0 or attack_age >= 0.0:

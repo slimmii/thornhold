@@ -1,6 +1,6 @@
 # Thornhold — The Emerald Gate
 
-A playable, single-player 3D medieval maze game made in Godot. You are a knight trapped in a ruined fortress. Find the glowing green portal while blackguards, ash hounds, and horned sentinels hunt you. Collect gold, buy increasingly long-reaching weapons, and survive the journey.
+A playable, single-player 3D medieval maze game made in Godot. You are a knight trapped in a ruined fortress. Find the emerald portal while blackguards, ash hounds, and horned sentinels hunt you. Collect gold, buy increasingly long-reaching weapons, and survive the journey.
 
 ## Play
 
@@ -13,6 +13,11 @@ On this Mac, double-click **Play Thornhold.command**, or run:
 ```
 
 Press **Enter** or click **Enter the labyrinth**. Your mouse is captured during play; **Esc** releases it and pauses the game.
+
+In the web version, click **Resume your journey** after pausing or switching tabs.
+Use **Return to the maze** or **B** to leave the armory. The game waits for mouse
+capture before resuming; if the browser declines, the menu stays available to
+click again. Escape keeps the web game paused so the pointer stays free.
 
 | Control | Action |
 | --- | --- |
@@ -27,8 +32,9 @@ Press **Enter** or click **Enter the labyrinth**. Your mouse is captured during 
 | M | Toggle the exploration map |
 | Enter on completion | Continue to the next level |
 | Enter after death | Retry the current level with your gear and gold |
-| Esc | Pause / resume, retry the level, start a new journey, or mute audio |
+| Esc | Open the pause menu; click Resume to continue on the web |
 | F11 | Toggle fullscreen |
+| F3 | Toggle FPS display |
 
 ## Web releases
 
@@ -55,6 +61,37 @@ installed automatically if needed. See [itch.io deployment](web/ITCH.md) for
 the one-time HTML5 settings, environment variables, and unattended CI usage.
 Deployment checks: `python3 tests/itch_deploy_test.py`.
 
+## Web performance
+
+The web build uses **Sharp (100%)** at full viewport resolution, with a sharp
+full-resolution HUD and no multisampling. Rendering at 100% avoids the 3D
+upscaling step. There is no graphics-mode switch.
+The FPS display starts enabled; **F3** toggles it.
+
+The game uses flat comic colors with basic Minecraft-inspired block lighting.
+Daylight reaches open areas, cover is darker, and torches cast steady warm light
+that spreads through open space and loses brightness with distance. Solid walls
+block its path. Light levels are baked once per level and stay fixed as you move.
+Enemies, weapons, and pickups share the same lighting.
+
+This uses a small light map with no dynamic lights, shadow maps, fog, bloom,
+metallic reflections, or moving dark-edge effects. All torches remain active.
+The portal keeps its opaque diamond design and emerald pennant.
+Enemies and courtyard statues have small, soft ground shadows. These simple
+ellipses share one batch of 30 triangles and stay attached to the objects as you
+move; they do not need real-time shadow rendering.
+
+The castle uses spatially grouped masonry so offscreen sections can be culled.
+Distant enemy poses update less often while movement, AI, and combat keep their
+normal update rate. Distant pickup models are hidden beyond 28 m.
+Weapons and shields keep their screen size while fitting inside the player's
+wall clearance. Wall collisions cover stone overhangs.
+
+Rebuild with `python3 tools/build_web.py` after changing game code, then serve it
+with `python3 tools/serve_web.py --skip-build`. Compare FPS in the same maze and
+view after reloading. Headless tests validate behavior and rendering workload;
+they do not measure browser FPS.
+
 ## Gold and upgrades
 
 Walk close to a spinning coin to collect **3 gold**. The first two coins in the entrance courtyard pay for your stick. Open the armory with **B**. Buy weapons in order: each purchase increases your accumulated reach and damage and equips the new weapon. Your gear and unspent gold carry across every level and retry in the current journey.
@@ -71,7 +108,7 @@ Blackguards drop 5 gold, ash hounds 4, and sentinels 12. Crimson tonics restore 
 
 ## Finding the exit
 
-The emerald diamond on your compass points toward the portal. Its green beacon rises above the castle walls. The map reveals connected corridors as you explore, and marks the portal's location. Follow the actual passages to get there: attacks and movement cannot pass through walls.
+The emerald diamond on your compass points toward the portal. An emerald pennant rises above the castle walls. The map reveals connected corridors as you explore, and marks the portal's location. Follow the actual passages to get there: attacks and movement cannot pass through walls.
 
 Monsters patrol until they see or hear you. They follow the maze's passage graph, remember your last position, and return to patrolling if they lose your trail. Sprinting helps you escape but attracts attention. Raise your shield while facing an attacker or buy a longer weapon to keep enemies away.
 
@@ -102,13 +139,15 @@ Enemies use their senses and remembered sightings. Searching and interception do
 - `scripts/enemy_visual.gd`: rigged GLB models, facing and scale, blended animation playback, and movement-based playback speed.
 - `scripts/enemy_animation_factory.gd`: reproducible idle, walk, run, attack, hit and death animation clips.
 - `assets/enemies/`: editable Blender sources, game GLBs, concept artwork, and native Godot animation libraries.
-- `scripts/art.gd`: original procedural low-poly castle, knight statues, weapons, and stone textures.
+- `scripts/art.gd`: original procedural low-poly castle, knight statues, weapons, and shared comic materials.
 - `scripts/hud.gd`: title screen, HUD, compass, exploration map, armory, pause, and results.
 - `scripts/pickup.gd`: coins and healing tonics.
 - `scripts/sound.gd`: synthesized effects and an ambient drone.
-- `assets/shaders/portal.gdshader`: animated emerald portal surface.
+- `scripts/block_lighting.gd`: static sky and torch light propagation on a small grid.
+- `assets/shaders/comic.gdshader`: fixed three-tone materials sampling the block light map.
+- `assets/shaders/portal.gdshader`: opaque emerald diamond portal design.
 
-The scene builds at runtime. Press F5 to see the castle; the editor's static viewport only contains the entry node. Stone and floor geometry use MultiMeshes, and nearby torches enable their lights according to distance. Enemy models load from the included GLBs; their Blender sources and concept references are included for editing. Godot's automatic Blender import is disabled because the game uses GLBs. The remaining geometry, textures, UI illustrations, and sounds are generated by this project. Fonts use installed system fonts with fallbacks; typography may vary between operating systems.
+The scene builds at runtime. Press F5 to see the castle; the editor's static viewport only contains the entry node. Stone and floor geometry use MultiMeshes, with flat comic shading throughout the scene. Enemy models load from the included GLBs; their Blender sources and concept references are included for editing. Godot's automatic Blender import is disabled because the game uses GLBs. The remaining geometry, UI illustrations, and sounds are generated by this project. Fonts use installed system fonts with fallbacks; typography may vary between operating systems.
 
 ## Verification
 

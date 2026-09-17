@@ -3,6 +3,10 @@ extends CharacterBody3D
 
 var game
 var camera: Camera3D
+var viewmodel: Node3D
+# Scale both the models and their camera offsets: perspective keeps their
+# screen size, while every swing stays inside the player's wall clearance.
+const VIEWMODEL_SCALE = 0.1
 var hand: Node3D
 var shield: Node3D
 var health: float = 100
@@ -29,30 +33,29 @@ func _ready() -> void:
 	camera = Camera3D.new()
 	camera.position.y = 1.62
 	camera.fov = 78
-	camera.near = 0.045
+	camera.near = 0.015
 	camera.far = 160
 	add_child(camera)
 	camera.make_current()
-	var lantern = OmniLight3D.new()
-	lantern.position = Vector3(0, 1.6, 0)
-	lantern.light_color = Color("b0c9da")
-	lantern.light_energy = 0.48
-	lantern.omni_range = 6
-	add_child(lantern)
+	viewmodel = Node3D.new()
+	viewmodel.name = "FirstPersonEquipment"
+	viewmodel.scale = Vector3.ONE * VIEWMODEL_SCALE
+	camera.add_child(viewmodel)
 	hand = Node3D.new()
-	camera.add_child(hand)
+	viewmodel.add_child(hand)
 	hand.position = Vector3(0.43, -0.43, -0.68)
 	hand.rotation = Vector3(-0.28, -0.12, -0.22)
 	CastleArt.weapon(hand, 0)
 	shield = Node3D.new()
-	camera.add_child(shield)
+	viewmodel.add_child(shield)
 	shield.position = Vector3(-0.48, -0.60, -0.85)
-	var rim = CastleArt.cylinder(shield, Vector3.ZERO, 0.30, 0.30, 0.065, CastleArt.mat("b9a574", 0.6), 10)
+	var rim = CastleArt.cylinder(shield, Vector3.ZERO, 0.30, 0.30, 0.065, CastleArt.mat("b9a574"), 10)
 	rim.rotation.x = PI / 2
-	var face = CastleArt.cylinder(shield, Vector3(0, 0, 0.04), 0.26, 0.26, 0.025, CastleArt.mat("335760", 0.3), 10)
+	var face = CastleArt.cylinder(shield, Vector3(0, 0, 0.04), 0.26, 0.26, 0.025, CastleArt.mat("335760"), 10)
 	face.rotation.x = PI / 2
-	CastleArt.box(shield, Vector3(0, 0, 0.067), Vector3(0.04, 0.4, 0.02), CastleArt.mat("c6b680", 0.5))
-	CastleArt.box(shield, Vector3(0, 0, 0.067), Vector3(0.33, 0.04, 0.02), CastleArt.mat("c6b680", 0.5))
+	CastleArt.box(shield, Vector3(0, 0, 0.067), Vector3(0.04, 0.4, 0.02), CastleArt.mat("c6b680"))
+	CastleArt.box(shield, Vector3(0, 0, 0.067), Vector3(0.33, 0.04, 0.02), CastleArt.mat("c6b680"))
+	CastleArt.disable_equipment_shadows(shield)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if game == null or game.state != "playing":
@@ -93,12 +96,15 @@ func _physics_process(delta: float) -> void:
 			game.sound.play("step", 0.23)
 	camera.position.y = lerpf(camera.position.y, 1.62 + (sin(bob_clock) * 0.037 if moving else 0.0), delta * 12)
 	camera.fov = lerpf(camera.fov, 84.0 if sprinting else 78.0, delta * 6)
+	update_equipment_pose(delta)
+	if Input.is_action_pressed("attack") and attack_cooldown <= 0:
+		attack()
+
+func update_equipment_pose(delta: float) -> void:
 	var arc = sin(swing * PI)
 	hand.position = Vector3(0.43 - arc * 0.33, -0.43 + arc * 0.08 + sin(bob_clock) * 0.012, -0.68 - arc * 0.18)
 	hand.rotation = Vector3(-0.28 - arc * 1.15, -0.12 + arc * 0.6, -0.22 + arc * 0.9)
 	shield.position = shield.position.lerp(Vector3(-0.22, -0.18, -0.67) if blocking else Vector3(-0.48, -0.60, -0.85), delta * 12)
-	if Input.is_action_pressed("attack") and attack_cooldown <= 0:
-		attack()
 
 func attack() -> void:
 	if attack_cooldown > 0 or blocking or game.state != "playing":
@@ -113,16 +119,18 @@ func attack() -> void:
 	for enemy in game.enemies:
 		if not is_instance_valid(enemy) or enemy.dead:
 			continue
-		var target = enemy.global_position + Vector3(0, enemy.target_height, 0)
-		var offset = target - camera.global_position
-		var distance = offset.length()
-		if distance > stats.reach or distance >= best_distance or forward.dot(offset.normalized()) < 0.68:
-			continue
-		var query = PhysicsRayQueryParameters3D.create(camera.global_position, target, 1)
-		if not get_world_3d().direct_space_state.intersect_ray(query).is_empty():
-			continue
-		best = enemy
-		best_distance = distance
+		for target in enemy.melee_targets(camera.global_position):
+			var offset = target - camera.global_position
+			var distance = offset.length()
+			if distance > stats.reach or distance >= best_distance:
+				continue
+			if distance > 0.001 and forward.dot(offset.normalized()) < 0.68:
+				continue
+			var query = PhysicsRayQueryParameters3D.create(camera.global_position, target, 1)
+			if not get_world_3d().direct_space_state.intersect_ray(query).is_empty():
+				continue
+			best = enemy
+			best_distance = distance
 	if best != null:
 		best.take_hit(stats.damage, forward)
 		game.hit_flash = 0.17

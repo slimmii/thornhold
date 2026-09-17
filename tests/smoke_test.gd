@@ -56,7 +56,7 @@ func run() -> void:
 	if game.web_profile:
 		check(root.disable_3d, "web title does not render the 3D world")
 		check(root.msaa_3d == Viewport.MSAA_DISABLED, "web disables multisampling")
-		check(is_equal_approx(root.scaling_3d_scale, 0.75), "web uses reduced 3D resolution")
+		check(is_equal_approx(root.scaling_3d_scale, 1.0), "web renders at full resolution without upscaling")
 	check(game.enemies.size() >= 10, "populates knights and monsters")
 	check(game.total_coins >= 30, "enough coins for upgrade progression")
 	var original_layout = game.maze.cells.duplicate()

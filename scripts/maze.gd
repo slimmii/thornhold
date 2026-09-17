@@ -13,6 +13,9 @@ var torches: Array[Node3D] = []
 var portal: Node3D
 var portal_disc: MeshInstance3D
 var seed_value: int = 0
+var web_profile = false
+var block_light: BlockLighting
+const WEB_CHUNK_SIZE = CELL * 3.0
 
 func generate(value: int, build: bool = true) -> void:
 	seed_value = value
@@ -128,7 +131,8 @@ func brick(pos: Vector3, size: Vector3, color: String, yaw: float = 0) -> void:
 
 func wall(pos: Vector3, yaw: float) -> void:
 	var basis = Basis(Vector3.UP, yaw)
-	var collision = CastleArt.solid_box(self, pos + Vector3(0, 1.65, 0), Vector3(CELL + 0.12, 3.3, 0.6))
+	# Include the plinth and coping overhang, not only the recessed mortar.
+	var collision = CastleArt.solid_box(self, pos + Vector3(0, 1.65, 0), Vector3(CELL + 0.13, 3.3, 0.82))
 	collision.rotation.y = yaw
 	# Recessed, opaque mortar closes the joints; collision shapes do not render.
 	brick(pos + Vector3(0, 1.57, 0), Vector3(CELL + 0.12, 3.14, 0.54), "293133", yaw)
@@ -176,7 +180,8 @@ func build_castle() -> void:
 	# Entrance: lanterns, guardian statues and a gold-inlaid processional path.
 	for side in [-1, 1]:
 		var pos = Vector3(CELL + side * 3.0, 0, CELL * 1.55)
-		CastleArt.box(self, pos + Vector3(0, 0.22, 0), Vector3(1.65, 0.44, 1.5), CastleArt.mat("66767b"))
+		var pedestal = CastleArt.box(self, pos + Vector3(0, 0.22, 0), Vector3(1.65, 0.44, 1.5), CastleArt.mat("66767b"))
+		pedestal.set_meta("ground_shadow_radii", Vector2(1.35, 1.25))
 		var statue = CastleArt.knight(self, pos + Vector3(0, 0.44, 0), true)
 		statue.scale = Vector3.ONE * 1.35
 		torches.append(CastleArt.torch(self, pos + Vector3(-side * 1.15, 0, -1.1)))
@@ -197,8 +202,10 @@ func build_castle() -> void:
 		var angle = float(i) * PI / 10
 		var segment = CastleArt.box(self, arch + Vector3(cos(angle) * 1.86, 3.5 + sin(angle) * 1.86, 0), Vector3(0.65, 0.53, 0.83), CastleArt.stone("7d8986"))
 		segment.rotation.z = angle - PI / 2
+		segment.set_meta("block_occluder", true)
 	var keystone = CastleArt.box(self, arch + Vector3(0, 5.38, -0.08), Vector3(0.46, 0.7, 1.0), CastleArt.stone("aaa98d"))
 	keystone.rotation.z = 0
+	keystone.set_meta("block_occluder", true)
 	# Tall perimeter towers establish the fortress silhouette above the maze.
 	for x in [-5.0, span + 0.3]:
 		for z in [-5.0, span * 0.45, span + 0.3]:
@@ -209,19 +216,88 @@ func build_castle() -> void:
 			for i in range(8):
 				var angle = i * TAU / 8
 				CastleArt.box(self, p + Vector3(sin(angle) * 3.2, 6.7, cos(angle) * 3.2), Vector3(1.1, 1.2, 1.1), CastleArt.mat("596973"))
-	for color in batches:
-		var multi = MultiMesh.new()
-		multi.transform_format = MultiMesh.TRANSFORM_3D
-		multi.mesh = BoxMesh.new()
-		multi.instance_count = batches[color].size()
-		for i in range(multi.instance_count):
-			multi.set_instance_transform(i, batches[color][i])
-		var node = MultiMeshInstance3D.new()
-		node.multimesh = multi
-		node.material_override = CastleArt.stone(color)
-		add_child(node)
+	if web_profile:
+		build_web_masonry()
+	else:
+		build_native_masonry()
 	batches.clear()
 	build_portal()
+
+func bake_block_light() -> void:
+	block_light = BlockLighting.new()
+	# The floor seals the volume even at the narrow gaps between tile meshes.
+	block_light.add_box(AABB(Vector3(-8.4, -0.4, -8.4), Vector3(78.4, 0.5, 78.4)))
+	for node in get_children():
+		if node is MultiMeshInstance3D:
+			# CPU transforms are recorded during batch creation; headless Godot
+			# cannot read the rendering server's MultiMesh buffers back.
+			for transform: Transform3D in node.get_meta("lighting_boxes"):
+				block_light.add_box(transform * AABB(Vector3.ONE * -0.5, Vector3.ONE))
+	for mesh: MeshInstance3D in find_children("*", "MeshInstance3D", true, false):
+		# Only structural stone blocks light. Small props and decorations do
+		# not become oversized, opaque voxels around statues or torch brackets.
+		var tower = mesh.mesh is CylinderMesh and mesh.mesh.bottom_radius > 2.0
+		if tower or mesh.has_meta("block_occluder"):
+			block_light.add_mesh(global_transform.affine_inverse() * mesh.global_transform, mesh.mesh)
+	var sources: Array[Vector3] = []
+	for torch_node in torches:
+		# Torches on north walls face into their own corridor.
+		sources.append(torch_node.position + Vector3(0, 1.6, 0.35))
+	block_light.bake(sources)
+	block_light.make_texture()
+
+func add_masonry_batch(transforms: Array, colors: Array, material: Material) -> MultiMeshInstance3D:
+	var node = add_box_batch(transforms, colors, material)
+	# The dummy renderer cannot read back GPU instance data.
+	node.set_meta("masonry_bounds", node.multimesh.custom_aabb)
+	return node
+
+func add_box_batch(transforms: Array, colors: Array, material: Material) -> MultiMeshInstance3D:
+	var multi = MultiMesh.new()
+	multi.transform_format = MultiMesh.TRANSFORM_3D
+	multi.use_colors = not colors.is_empty()
+	multi.mesh = BoxMesh.new()
+	multi.instance_count = transforms.size()
+	var bounds = AABB()
+	for i in range(multi.instance_count):
+		var transform: Transform3D = transforms[i]
+		multi.set_instance_transform(i, transform)
+		if multi.use_colors:
+			multi.set_instance_color(i, colors[i])
+		var instance_bounds: AABB = transform * multi.mesh.get_aabb()
+		bounds = instance_bounds if i == 0 else bounds.merge(instance_bounds)
+	multi.custom_aabb = bounds
+	var node = MultiMeshInstance3D.new()
+	node.multimesh = multi
+	node.material_override = material
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.set_meta("lighting_boxes", transforms)
+	add_child(node)
+	return node
+
+func build_native_masonry() -> void:
+	for color in batches:
+		add_masonry_batch(batches[color], [], CastleArt.stone(color))
+
+func build_web_masonry() -> void:
+	# One material per spatial chunk, with per-instance colors. Large slabs keep
+	# their own batch so their bounds cannot defeat culling of nearby masonry.
+	var chunks: Dictionary = {}
+	for color: String in batches:
+		for transform: Transform3D in batches[color]:
+			var key = Vector2i(floori(transform.origin.x / WEB_CHUNK_SIZE), floori(transform.origin.z / WEB_CHUNK_SIZE))
+			if transform.basis.get_scale().length() > WEB_CHUNK_SIZE * 2.0:
+				key = Vector2i(-100, -100)
+			if not chunks.has(key):
+				chunks[key] = {"transforms": [], "colors": []}
+			chunks[key].transforms.append(transform)
+			chunks[key].colors.append(Color(color))
+	var material = CastleArt.web_masonry_material()
+	for key: Vector2i in chunks:
+		var data: Dictionary = chunks[key]
+		var node = add_masonry_batch(data.transforms, data.colors, material)
+		node.name = "Masonry_%d_%d" % [key.x, key.y]
+		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 func build_portal() -> void:
 	portal = Node3D.new()
@@ -231,7 +307,7 @@ func build_portal() -> void:
 	portal.rotation.y = atan2(-approach.x, -approach.y)
 	add_child(portal)
 	var stone = CastleArt.mat("738783")
-	var rune = CastleArt.mat("64ffc0", 0, 2.0)
+	var rune = CastleArt.mat("64ffc0")
 	CastleArt.cylinder(portal, Vector3(0, 0.12, 0), 1.8, 1.8, 0.24, stone, 16)
 	for side in [-1, 1]:
 		CastleArt.box(portal, Vector3(side * 1.34, 1.34, 0), Vector3(0.44, 2.65, 0.62), stone)
@@ -247,23 +323,6 @@ func build_portal() -> void:
 	var material = ShaderMaterial.new()
 	material.shader = load("res://assets/shaders/portal.gdshader")
 	portal_disc = CastleArt.mesh(portal, plane, Vector3(0, 1.97, 0), material)
-	CastleArt.light(portal, Vector3(0, 2, 0), Color("46ffa3"), 4.4, 12)
-	# A high beacon is visible above the battlements as an orientation landmark.
-	var beam_mat = CastleArt.mat("32cfa0", 0, 0.6).duplicate()
-	beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	beam_mat.albedo_color.a = 0.13
-	beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	CastleArt.cylinder(portal, Vector3(0, 13, 0), 0.4, 0.13, 20, beam_mat, 12)
-	for i in range(18):
-		var mote = CastleArt.sphere(portal, Vector3(sin(i * 2.4) * 1.1, 0.3 + i * 0.2, cos(i * 2.4) * 0.3), 0.035, rune)
-		mote.set_meta("phase", i * 0.8)
-
-func animate(time: float, player_pos: Vector3) -> void:
-	for torch_node in torches:
-		var lamp = torch_node.get_child(torch_node.get_child_count() - 1)
-		lamp.visible = torch_node.global_position.distance_squared_to(player_pos) < 400
-		if lamp.visible:
-			lamp.light_energy = 1.95 + sin(time * 9 + torch_node.position.x) * 0.18 + sin(time * 17) * 0.09
-	for child in portal.get_children():
-		if child.has_meta("phase"):
-			child.position.y = fposmod(time * 0.32 + float(child.get_meta("phase")), 3.5) + 0.2
+	# A solid emerald pennant keeps the exit landmark above the battlements.
+	CastleArt.cylinder(portal, Vector3(0, 5.7, 0.4), 0.055, 0.055, 5.2, stone, 6)
+	CastleArt.box(portal, Vector3(0.6, 7.65, 0.4), Vector3(1.2, 0.7, 0.06), rune)

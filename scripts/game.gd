@@ -15,6 +15,7 @@ var player: MazePlayer
 var hud: MazeHUD
 var sound: MazeSound
 var world: Node3D
+var ground_shadows: GroundShadows
 var enemies: Array[MazeEnemy] = []
 var discovered: Dictionary = {}
 var level: int = 1
@@ -38,6 +39,12 @@ var save_records = true
 var capture_path = ""
 var capture_frames = 0
 var web_profile = OS.has_feature("web") or "--web-profile" in OS.get_cmdline_user_args()
+# Only a real browser needs asynchronous pointer-lock confirmation. The
+# --web-profile flag also runs rendering/gameplay checks with native input.
+var browser_pointer = OS.has_feature("web")
+var capture_pending = false
+var show_performance = web_profile
+var hud_elapsed = 0.0
 
 func _ready() -> void:
 	if OS.has_feature("web"):
@@ -46,8 +53,11 @@ func _ready() -> void:
 		# Leave browser time for input and avoid rendering the castle behind menus.
 		Engine.max_fps = 60
 		get_viewport().msaa_3d = Viewport.MSAA_DISABLED
-		get_viewport().scaling_3d_scale = 0.75
+		# Matching the viewport resolution bypasses 3D resolution upscaling.
+		get_viewport().scaling_3d_scale = 1.0
 		get_viewport().disable_3d = true
+	# Comic surfaces need no local-light shadow allocation.
+	get_viewport().positional_shadow_atlas_size = 0
 	configure_input()
 	make_environment()
 	if OS.has_feature("web"):
@@ -74,7 +84,8 @@ func _ready() -> void:
 			start()
 		if arg.begins_with("--capture="):
 			capture_path = arg.trim_prefix("--capture=")
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if state == "title" else Input.MOUSE_MODE_CAPTURED
+	if state == "title" and not capture_pending:
+		release_pointer()
 
 func configure_input() -> void:
 	var keys = {"forward": KEY_W, "back": KEY_S, "left": KEY_A, "right": KEY_D, "jump": KEY_SPACE, "sprint": KEY_SHIFT}
@@ -91,35 +102,19 @@ func configure_input() -> void:
 		button.button_index = MOUSE_BUTTON_LEFT if action == "attack" else MOUSE_BUTTON_RIGHT
 		InputMap.action_add_event(action, button)
 
+func _exit_tree() -> void:
+	if is_instance_valid(maze) and CastleArt.block_light == maze.block_light:
+		CastleArt.use_block_light(null)
+
 func make_environment() -> void:
 	var environment_node = WorldEnvironment.new()
 	var environment = Environment.new()
-	environment.background_mode = Environment.BG_SKY
-	var sky = Sky.new()
-	var sky_material = ProceduralSkyMaterial.new()
-	sky_material.sky_top_color = Color("132a40")
-	sky_material.sky_horizon_color = Color("465e70")
-	sky_material.ground_bottom_color = Color("17252f")
-	sky_material.ground_horizon_color = Color("465e70")
-	sky_material.sky_curve = 0.20
-	sky.sky_material = sky_material
-	environment.sky = sky
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color("a3c2d4")
-	environment.ambient_light_energy = 0.52
-	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	environment.fog_enabled = true
-	environment.fog_light_color = Color("455e6c")
-	environment.fog_density = 0.007
+	environment.background_mode = Environment.BG_COLOR
+	environment.background_color = Color("9eafb5")
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	environment_node.environment = environment
 	add_child(environment_node)
-	var sun = DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-32, -32, 0)
-	sun.light_color = Color("ffdaa5")
-	sun.light_energy = 0.82
-	sun.shadow_enabled = not web_profile
-	sun.directional_shadow_max_distance = 65
-	add_child(sun)
 
 func new_run(value: int) -> void:
 	level = 1
@@ -149,8 +144,11 @@ func load_level(value: int) -> void:
 	show_map = false
 	current_seed = value
 	maze = CastleMaze.new()
+	maze.web_profile = web_profile
 	world.add_child(maze)
 	maze.generate(value)
+	maze.bake_block_light()
+	CastleArt.use_block_light(maze.block_light)
 	player = MazePlayer.new()
 	player.game = self
 	player.position = maze.center(Vector2i(1, 0)) + Vector3(0, 0.05, -0.35)
@@ -159,6 +157,9 @@ func load_level(value: int) -> void:
 	if weapon_tier > 0:
 		CastleArt.weapon(player.hand, weapon_tier)
 	spawn_population()
+	ground_shadows = GroundShadows.new()
+	world.add_child(ground_shadows)
+	ground_shadows.configure(self)
 	reveal_map()
 
 func spawn_population() -> void:
@@ -213,22 +214,79 @@ func spawn_pickup(pos: Vector3, healing: bool = false) -> MazePickup:
 	return pickup
 
 func start() -> void:
-	state = "playing"
-	if web_profile:
-		get_viewport().disable_3d = false
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	player.camera.rotation.x = 0
 	if level == 1 and weapon_tier == 0:
 		toast("Level 1 · Find the Emerald Gate. Collect 6 gold for your first weapon [B].", 7)
 	else:
 		toast("Level %d · %s · %d gold carried forward" % [level, WEAPONS[weapon_tier].name, coins], 6)
-	if is_instance_valid(hud):
-		hud.refresh_buttons()
+	set_mode("playing")
+
+func is_pointer_captured() -> bool:
+	# Godot's web backend reads document.pointerLockElement here, rather than
+	# merely returning the last requested mode.
+	return Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+
+func capture_pointer() -> void:
+	# Restore canvas keyboard focus as well as mouse look. Keep this call
+	# synchronous with the Resume button or key input event.
+	if browser_pointer:
+		JavaScriptBridge.eval("document.getElementById('canvas').focus({preventScroll: true});")
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+func release_pointer() -> void:
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+func clear_gameplay_input() -> void:
+	# Key-up events can be lost when the browser or a menu takes focus. Also
+	# prevent the Resume click from becoming the first attack after closing.
+	for action in ["forward", "back", "left", "right", "jump", "sprint", "attack", "block"]:
+		Input.action_release(action)
+	player.blocking = false
+	player.sprinting = false
+	player.velocity.x = 0
+	player.velocity.z = 0
+
+func enter_playing() -> void:
+	capture_pending = false
+	state = "playing"
+	if web_profile:
+		get_viewport().disable_3d = false
+	clear_gameplay_input()
+	get_viewport().gui_release_focus()
+	hud.refresh_buttons()
+
+func synchronize_pointer() -> void:
+	if not browser_pointer:
+		return
+	if capture_pending:
+		if is_pointer_captured():
+			enter_playing()
+	elif state == "playing" and not is_pointer_captured():
+		# Escape can unlock the browser without delivering a key event to Godot.
+		set_mode("paused")
+	elif state != "playing" and is_pointer_captured():
+		# A late grant must not hide the pointer after a different menu opened.
+		release_pointer()
 
 func set_mode(mode: String) -> void:
+	clear_gameplay_input()
+	if mode == "playing":
+		if browser_pointer:
+			capture_pending = true
+			if state in ["loading", "playing"]:
+				state = "paused"
+				hud.refresh_buttons()
+			# Keep the current menu available if the browser rejects capture.
+			# A subsequent button click can retry without a reload.
+			capture_pointer()
+			synchronize_pointer()
+		else:
+			capture_pointer()
+			enter_playing()
+		return
+	capture_pending = false
 	state = mode
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if mode == "playing" else Input.MOUSE_MODE_VISIBLE
-	player.blocking = false
+	release_pointer()
 	hud.refresh_buttons()
 
 func restart(fresh: bool = false) -> void:
@@ -295,11 +353,11 @@ func reveal_map() -> void:
 		discovered[next] = true
 
 func _process(delta: float) -> void:
+	synchronize_pointer()
 	clock += delta
 	if web_profile and state == "title":
 		# The title is static in browsers; don't rebuild text or animate the world.
 		return
-	maze.animate(clock, player.position)
 	if state == "playing":
 		elapsed += delta
 		damage_flash = maxf(0, damage_flash - delta)
@@ -318,7 +376,10 @@ func _process(delta: float) -> void:
 		player.hand.visible = true
 		player.shield.visible = true
 	if is_instance_valid(hud):
-		hud.queue_redraw()
+		hud_elapsed += delta
+		if not web_profile or (state == "playing" and hud_elapsed >= 1.0 / 30.0):
+			hud_elapsed = 0.0
+			hud.queue_redraw()
 	if not capture_path.is_empty():
 		capture_frames += 1
 		if capture_frames == 45:
@@ -330,14 +391,24 @@ func capture() -> void:
 	print("SCREENSHOT ", capture_path, " result=", error)
 	get_tree().quit(error)
 
+func _input(_event: InputEvent) -> void:
+	if browser_pointer and state == "playing" and not is_pointer_captured():
+		set_mode("paused")
+		get_viewport().set_input_as_handled()
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.physical_keycode:
+			KEY_F3:
+				show_performance = not show_performance
+				hud.queue_redraw()
 			KEY_ESCAPE:
-				if state == "playing":
+				if state == "playing" or capture_pending:
 					set_mode("paused")
 				elif state in ["paused", "shop"]:
-					set_mode("playing")
+					# Escape belongs to the browser's pointer-unlock gesture.
+					# It cannot reliably be reused to recapture the same pointer.
+					set_mode("paused" if browser_pointer else "playing")
 			KEY_B:
 				if state == "playing":
 					set_mode("shop")
@@ -361,8 +432,8 @@ func _unhandled_input(event: InputEvent) -> void:
 					buy(event.physical_keycode - KEY_1 + 1)
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and state == "playing" and is_instance_valid(hud) and capture_path.is_empty():
-		set_mode("paused")
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and is_instance_valid(hud) and capture_path.is_empty():
+		set_mode("paused" if state == "playing" else state)
 
 func time_text(value: float) -> String:
 	return "%02d:%02d" % [int(value) / 60, int(value) % 60]
